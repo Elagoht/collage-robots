@@ -1,0 +1,55 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Elagoht/collage-snippets-highlighter/main/schemas/collage-plugin-manifest.schema.json",
+  "name": "elagoht/robots",
+  "description": "A collage plugin that serves /robots.txt.",
+  "repository": "https://github.com/Elagoht/collage-robots",
+  "config": {
+    "type": "object",
+    "description": "A collage plugin that serves /robots.txt.",
+    "properties": {
+      "disallowAll": {
+        "type": "boolean",
+        "description": "DisallowAll closes the site to every crawler, whatever Rules say, and serves every response with X-Robots-Tag: noindex, nofollow. For a staging or preview deployment."
+      },
+      "rules": {
+        "type": "array",
+        "description": "Rules are the groups of robots.txt, in order. Empty allows every crawler everything.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "allow": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "crawlDelay": {
+              "type": "integer",
+              "description": "CrawlDelay asks for this many seconds between requests; zero leaves it out. Not every crawler honours it."
+            },
+            "disallow": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "userAgents": {
+              "type": "array",
+              "description": "UserAgents the group applies to; empty is \"*\".",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "sitemaps": {
+        "type": "array",
+        "description": "Sitemaps are the absolute URLs of the site's sitemaps.",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
