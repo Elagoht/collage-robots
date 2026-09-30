@@ -40,7 +40,8 @@
                 "type": "string"
               }
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "sitemaps": {
@@ -50,6 +51,7 @@
           "type": "string"
         }
       }
-    }
+    },
+    "additionalProperties": false
   }
 }
