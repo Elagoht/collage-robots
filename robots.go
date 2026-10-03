@@ -85,6 +85,9 @@ func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 	relative := false
 	for _, s := range p.opts.Sitemaps {
 		switch u, err := url.Parse(s); {
+		case strings.HasPrefix(s, "//"):
+			// Scheme-relative: another host's URL, not a path on this one.
+			return fmt.Errorf("robots: sitemap %q must be an absolute URL or a path", s)
 		case strings.HasPrefix(s, "/"):
 			relative = true
 		case err != nil || !u.IsAbs():

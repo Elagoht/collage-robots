@@ -126,8 +126,15 @@ func TestSitemapValidation(t *testing.T) {
 	for _, tc := range []struct {
 		sitemap string
 		noBase  bool
-	}{{"/sitemap.xml", true}, {"sitemap.xml", false}} {
+		base    string
+	}{
+		{"/sitemap.xml", true, ""},
+		{"sitemap.xml", false, ""},
+		// A scheme-relative URL is another host's, not a path on this one.
+		{"//evil.com/sitemap.xml", false, "https://example.com"},
+	} {
 		app, err := collage.New(&collage.Config{
+			BaseURL:  tc.base,
 			Server:   collage.ServerConfig{Host: "localhost", Port: 3000},
 			Template: collage.TemplateConfig{FS: fstest.MapFS{"t/p.html": {Data: []byte(`x`)}}, Root: "t"},
 			Plugins:  []collage.Plugin{robots.New(robots.Options{Sitemaps: []string{tc.sitemap}})},
@@ -142,6 +149,9 @@ func TestSitemapValidation(t *testing.T) {
 		}
 		if tc.noBase && !errors.Is(err, robots.ErrNoBaseURL) {
 			t.Errorf("Sitemaps %q: err = %v, want ErrNoBaseURL", tc.sitemap, err)
+		}
+		if !tc.noBase && !strings.Contains(err.Error(), "must be an absolute URL or a path") {
+			t.Errorf("Sitemaps %q: err = %v, want \"must be an absolute URL or a path\"", tc.sitemap, err)
 		}
 	}
 }
