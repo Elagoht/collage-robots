@@ -16,8 +16,10 @@ package robots
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/Elagoht/collage/pkg/collage"
@@ -31,7 +33,8 @@ type Options struct {
 	// Rules are the groups of robots.txt, in order. Empty allows every crawler
 	// everything.
 	Rules []Rule `json:"rules"`
-	// Sitemaps are the absolute URLs of the site's sitemaps.
+	// Sitemaps are absolute URLs, or paths made absolute against the request's
+	// origin.
 	Sitemaps []string `json:"sitemaps"`
 	// DisallowAll closes the site to every crawler, whatever Rules say, and
 	// serves every response with X-Robots-Tag: noindex, nofollow. For a staging
@@ -51,6 +54,10 @@ type Rule struct {
 	CrawlDelay int `json:"crawlDelay"`
 }
 
+// ErrNoBaseURL is returned by Init for a sitemap given as a path when collage
+// can name no origin to make it absolute with.
+var ErrNoBaseURL = errors.New("robots: a sitemap given as a path needs Config.BaseURL, or a plugin resolving each host's origin")
+
 // Plugin serves robots.txt.
 type Plugin struct{ opts Options }
 
@@ -59,7 +66,7 @@ type Plugin struct{ opts Options }
 func New(opts Options) *Plugin { return &Plugin{opts: opts} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.1.2" }
+func (p *Plugin) Version() string                { return "0.2.0" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 // Init reads the configuration and registers /robots.txt, and the header when the
@@ -75,10 +82,31 @@ func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 			}
 		}
 	}
-	doc := collage.NewDocument(Name, "text/plain; charset=utf-8").
-		AtRoot("/robots.txt").
-		WithBody(p.Render()).
-		Build()
+	relative := false
+	for _, s := range p.opts.Sitemaps {
+		switch u, err := url.Parse(s); {
+		case strings.HasPrefix(s, "/"):
+			relative = true
+		case err != nil || !u.IsAbs():
+			return fmt.Errorf("robots: sitemap %q must be an absolute URL or a path", s)
+		}
+	}
+	if relative && !canResolve(host) {
+		return ErrNoBaseURL
+	}
+	b := collage.NewDocument(Name, "text/plain; charset=utf-8").AtRoot("/robots.txt")
+	if relative {
+		b = b.WithHandler(func(_ context.Context, rc *collage.RenderContext) ([]byte, []string, error) {
+			origin := collage.BaseURL(rc)
+			if origin == "" {
+				return nil, nil, ErrNoBaseURL
+			}
+			return p.render(origin), nil, nil
+		}).Static()
+	} else {
+		b = b.WithBody(p.Render())
+	}
+	doc := b.Build()
 	if err := host.RegisterDocument(doc); err != nil {
 		return fmt.Errorf("robots: %w", err)
 	}
@@ -94,7 +122,10 @@ func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 }
 
 // Render returns robots.txt as the plugin serves it.
-func (p *Plugin) Render() []byte {
+func (p *Plugin) Render() []byte { return p.render("") }
+
+// render is Render with sitemap paths made absolute against origin.
+func (p *Plugin) render(origin string) []byte {
 	var b bytes.Buffer
 	rules := p.opts.Rules
 	if p.opts.DisallowAll {
@@ -131,6 +162,9 @@ func (p *Plugin) Render() []byte {
 	if len(p.opts.Sitemaps) > 0 && !p.opts.DisallowAll {
 		b.WriteByte('\n')
 		for _, sitemap := range p.opts.Sitemaps {
+			if strings.HasPrefix(sitemap, "/") {
+				sitemap = origin + sitemap
+			}
 			fmt.Fprintf(&b, "Sitemap: %s\n", clean(sitemap))
 		}
 	}
@@ -141,4 +175,15 @@ func (p *Plugin) Render() []byte {
 // directive nobody wrote.
 func clean(s string) string {
 	return strings.NewReplacer("\r", "", "\n", "").Replace(strings.TrimSpace(s))
+}
+
+// canResolve reports whether collage can name an origin without the plugin's
+// own BaseURL: from Config.BaseURL, or per host from a plugin implementing
+// collage.OriginResolver.
+func canResolve(host collage.Host) bool {
+	if host.BaseURL() != "" {
+		return true
+	}
+	origins, ok := host.(collage.Origins)
+	return ok && origins.Dynamic()
 }

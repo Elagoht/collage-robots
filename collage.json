@@ -46,7 +46,7 @@
       },
       "sitemaps": {
         "type": "array",
-        "description": "Sitemaps are the absolute URLs of the site's sitemaps.",
+        "description": "Sitemaps are absolute URLs, or paths made absolute against the request's origin.",
         "items": {
           "type": "string"
         }

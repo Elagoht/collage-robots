@@ -1,10 +1,14 @@
 package robots_test
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	robots "github.com/Elagoht/collage-robots"
 	"github.com/Elagoht/collage/pkg/collage"
@@ -75,5 +79,69 @@ func TestValuesStayOnTheirLine(t *testing.T) {
 	rec := serve(t, robots.New(robots.Options{Rules: []robots.Rule{{Disallow: []string{"/a\nAllow: /secret"}}}}), "/robots.txt")
 	if rec.Body.String() != "User-agent: *\nDisallow: /aAllow: /secret\n" {
 		t.Errorf("robots.txt = %q", rec.Body.String())
+	}
+}
+
+// origins resolves two hosts, as elagoht/tenant would.
+type origins struct{}
+
+func (origins) Name() string                             { return "test/origins" }
+func (origins) Version() string                          { return "0" }
+func (origins) Init(context.Context, collage.Host) error { return nil }
+func (origins) Shutdown(context.Context) error           { return nil }
+func (origins) Origin(_ context.Context, host string) (string, bool) {
+	switch host {
+	case "a.test":
+		return "https://a.example", true
+	case "b.test":
+		return "https://b.example", true
+	}
+	return "", false
+}
+
+// A sitemap given as a path is made absolute against the request's origin.
+func TestRelativeSitemapFollowsHost(t *testing.T) {
+	app, err := collage.New(&collage.Config{
+		Server:   collage.ServerConfig{Host: "localhost", Port: 3000},
+		Template: collage.TemplateConfig{FS: fstest.MapFS{"t/p.html": {Data: []byte(`x`)}}, Root: "t"},
+		Cache:    collage.CacheConfig{Enabled: true, Type: "memory", DefaultTTL: time.Hour},
+		Plugins:  []collage.Plugin{origins{}, robots.New(robots.Options{Sitemaps: []string{"/sitemap.xml", "https://cdn.example/s.xml"}})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for host, want := range map[string]string{"a.test": "Sitemap: https://a.example/sitemap.xml\n", "b.test": "Sitemap: https://b.example/sitemap.xml\n"} {
+		rec := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://"+host+"/robots.txt", nil))
+		body := rec.Body.String()
+		if !strings.Contains(body, want) || !strings.Contains(body, "Sitemap: https://cdn.example/s.xml\n") {
+			t.Errorf("%s robots.txt = %q, want %q and the absolute one", host, body, want)
+		}
+	}
+}
+
+// A relative sitemap with no way to make it absolute refuses to start; one that is
+// neither absolute nor a path is refused too. Init runs on Start.
+func TestSitemapValidation(t *testing.T) {
+	for _, tc := range []struct {
+		sitemap string
+		noBase  bool
+	}{{"/sitemap.xml", true}, {"sitemap.xml", false}} {
+		app, err := collage.New(&collage.Config{
+			Server:   collage.ServerConfig{Host: "localhost", Port: 3000},
+			Template: collage.TemplateConfig{FS: fstest.MapFS{"t/p.html": {Data: []byte(`x`)}}, Root: "t"},
+			Plugins:  []collage.Plugin{robots.New(robots.Options{Sitemaps: []string{tc.sitemap}})},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = app.Start()
+		if err == nil {
+			t.Errorf("Sitemaps %q started, want an error", tc.sitemap)
+			continue
+		}
+		if tc.noBase && !errors.Is(err, robots.ErrNoBaseURL) {
+			t.Errorf("Sitemaps %q: err = %v, want ErrNoBaseURL", tc.sitemap, err)
+		}
 	}
 }
