@@ -66,15 +66,17 @@ type Plugin struct{ opts Options }
 func New(opts Options) *Plugin { return &Plugin{opts: opts} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.2.0" }
+func (p *Plugin) Version() string                { return "0.2.1" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 // Init reads the configuration and registers /robots.txt, and the header when the
 // site is closed.
 func (p *Plugin) Init(_ context.Context, host collage.Host) error {
-	if err := host.Config(&p.opts); err != nil {
+	cfg, err := collage.PluginConfig(host, p.opts)
+	if err != nil {
 		return err
 	}
+	p.opts = cfg
 	for _, rule := range p.opts.Rules {
 		for _, path := range append(append([]string(nil), rule.Allow...), rule.Disallow...) {
 			if path != "" && !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "*") {

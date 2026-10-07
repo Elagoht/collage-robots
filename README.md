@@ -10,7 +10,7 @@ app, err := collage.New(&collage.Config{
 })
 ```
 
-Requires collage v0.21.0 or later.
+Requires collage v0.50.0 or later.
 
 With no rules it allows every crawler everything:
 
