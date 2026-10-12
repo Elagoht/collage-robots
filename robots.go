@@ -49,8 +49,9 @@ type Rule struct {
 	UserAgents []string `json:"userAgents"`
 	Allow      []string `json:"allow"`
 	Disallow   []string `json:"disallow"`
-	// CrawlDelay asks for this many seconds between requests; zero leaves it out.
-	// Not every crawler honours it.
+	// CrawlDelay asks for this many seconds between requests; zero leaves it out,
+	// and a negative delay stops the application at start. Not every crawler
+	// honours it.
 	CrawlDelay int `json:"crawlDelay"`
 }
 
@@ -66,7 +67,7 @@ type Plugin struct{ opts Options }
 func New(opts Options) *Plugin { return &Plugin{opts: opts} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.2.4" }
+func (p *Plugin) Version() string                { return "0.3.0" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 // Init reads the configuration and registers /robots.txt, and the header when the
@@ -78,6 +79,9 @@ func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 	}
 	p.opts = cfg
 	for _, rule := range p.opts.Rules {
+		if rule.CrawlDelay < 0 {
+			return fmt.Errorf("robots: crawlDelay %d: a delay is zero or more seconds", rule.CrawlDelay)
+		}
 		for _, path := range append(append([]string(nil), rule.Allow...), rule.Disallow...) {
 			if path != "" && !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "*") {
 				return fmt.Errorf("robots: path %q must begin with / or *", path)
@@ -109,7 +113,7 @@ func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 			return p.render(origin), nil, nil
 		}).Static()
 	} else {
-		b = b.WithBody(p.Render())
+		b = b.WithBody(p.render(""))
 	}
 	doc := b.Build()
 	if err := host.RegisterDocument(doc); err != nil {
@@ -126,10 +130,9 @@ func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 	return nil
 }
 
-// Render returns robots.txt as the plugin serves it.
-func (p *Plugin) Render() []byte { return p.render("") }
-
-// render is Render with sitemap paths made absolute against origin.
+// render returns robots.txt as the plugin serves it, with sitemap paths made
+// absolute against origin. It reads the options Init decoded, so it runs only
+// after Init.
 func (p *Plugin) render(origin string) []byte {
 	var b bytes.Buffer
 	rules := p.opts.Rules

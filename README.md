@@ -10,7 +10,7 @@ app, err := collage.New(&collage.Config{
 })
 ```
 
-Requires collage v0.60.0 or later.
+Requires collage v0.61.0 or later.
 
 With no rules it allows every crawler everything:
 
@@ -34,7 +34,8 @@ robots.New(robots.Options{
 ```
 
 A rule with no user agents is for `*`. `CrawlDelay` asks for seconds between
-requests, which not every crawler honours. A path must begin with `/` or `*`, and a
+requests, which not every crawler honours; a negative delay stops the application
+at start. A path must begin with `/` or `*`, and a
 value cannot break onto a line of its own.
 
 ## Sitemaps as paths
@@ -74,3 +75,21 @@ still be indexed without being fetched, and the header is what keeps it out.
 
 With absolute sitemaps the body is fixed when the application starts; with a path
 it is made per request origin. A static build writes it to `robots.txt`.
+
+## Changes
+
+### v0.3.0
+
+Changed in v0.3.0, for the v1 plugin conventions:
+
+| was | now |
+|---|---|
+| `(*Plugin).Render()` | removed; request `/robots.txt` from the application (`collagetest.NewSite(…).Get("/robots.txt")` in a test) |
+
+- `Render` read the Go options before `Init` had decoded the plugin
+  configuration, and wrote a sitemap given as a path without an origin
+  (`Sitemap: /sitemap.xml`), which the protocol does not allow. The served
+  `robots.txt` was always right.
+- A negative `crawlDelay` stops the application at start; it was left out
+  silently.
+- Requires collage v0.61.0.

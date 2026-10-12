@@ -12,32 +12,20 @@ import (
 
 	robots "github.com/Elagoht/collage-robots"
 	"github.com/Elagoht/collage/pkg/collage"
+	"github.com/Elagoht/collage/pkg/collagetest"
 )
 
-func serve(t *testing.T, p *robots.Plugin, path string) *httptest.ResponseRecorder {
+func serve(t *testing.T, p *robots.Plugin, path string, options ...collagetest.SiteOption) *collagetest.Response {
 	t.Helper()
-	app, err := collage.New(&collage.Config{
-		Server:   collage.ServerConfig{Host: "localhost", Port: 3000},
-		Template: collage.TemplateConfig{FS: fstest.MapFS{"t/p.html": {Data: []byte(`<p>x</p>`)}}, Root: "t"},
-		Plugins:  []collage.Plugin{p},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := app.RegisterPage(collage.NewPage("home").WithContent(collage.NewFragment("home", "p.html").Build()).WithPath("en", "/").Build()); err != nil {
-		t.Fatal(err)
-	}
-	rec := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-	return rec
+	return collagetest.NewSite(t, append([]collagetest.SiteOption{collagetest.WithPlugins(p)}, options...)...).Get(path)
 }
 
 func TestDefaultAllowsEverything(t *testing.T) {
 	rec := serve(t, robots.New(robots.Options{}), "/robots.txt")
-	if rec.Code != http.StatusOK || rec.Body.String() != "User-agent: *\nAllow: /\n" {
-		t.Errorf("robots.txt = %d %q", rec.Code, rec.Body.String())
+	if rec.Status != http.StatusOK || rec.Body != "User-agent: *\nAllow: /\n" {
+		t.Errorf("robots.txt = %d %q", rec.Status, rec.Body)
 	}
-	if ct := rec.Header().Get("Content-Type"); ct != "text/plain; charset=utf-8" {
+	if ct := rec.Header.Get("Content-Type"); ct != "text/plain; charset=utf-8" {
 		t.Errorf("Content-Type = %q", ct)
 	}
 }
@@ -53,8 +41,8 @@ func TestRulesAndSitemaps(t *testing.T) {
 	want := "User-agent: *\nDisallow: /admin\nDisallow: /search\n\n" +
 		"User-agent: GPTBot\nUser-agent: CCBot\nDisallow: /\nCrawl-delay: 10\n\n" +
 		"Sitemap: https://example.com/sitemap.xml\n"
-	if rec.Body.String() != want {
-		t.Errorf("robots.txt =\n%s\nwant\n%s", rec.Body.String(), want)
+	if rec.Body != want {
+		t.Errorf("robots.txt =\n%s\nwant\n%s", rec.Body, want)
 	}
 }
 
@@ -63,13 +51,13 @@ func TestRulesAndSitemaps(t *testing.T) {
 func TestDisallowAll(t *testing.T) {
 	p := robots.New(robots.Options{DisallowAll: true, Sitemaps: []string{"https://example.com/sitemap.xml"}, Rules: []robots.Rule{{Allow: []string{"/"}}}})
 	rec := serve(t, p, "/robots.txt")
-	if rec.Body.String() != "User-agent: *\nDisallow: /\n" {
-		t.Errorf("robots.txt = %q", rec.Body.String())
+	if rec.Body != "User-agent: *\nDisallow: /\n" {
+		t.Errorf("robots.txt = %q", rec.Body)
 	}
-	if got := serve(t, p, "/").Header().Get("X-Robots-Tag"); got != "noindex, nofollow" {
+	if got := serve(t, p, "/").Header.Get("X-Robots-Tag"); got != "noindex, nofollow" {
 		t.Errorf("X-Robots-Tag = %q", got)
 	}
-	if got := serve(t, robots.New(robots.Options{}), "/").Header().Get("X-Robots-Tag"); got != "" {
+	if got := serve(t, robots.New(robots.Options{}), "/").Header.Get("X-Robots-Tag"); got != "" {
 		t.Errorf("an open site sends X-Robots-Tag %q", got)
 	}
 }
@@ -77,8 +65,28 @@ func TestDisallowAll(t *testing.T) {
 // A newline in a value cannot start a directive of its own.
 func TestValuesStayOnTheirLine(t *testing.T) {
 	rec := serve(t, robots.New(robots.Options{Rules: []robots.Rule{{Disallow: []string{"/a\nAllow: /secret"}}}}), "/robots.txt")
-	if rec.Body.String() != "User-agent: *\nDisallow: /aAllow: /secret\n" {
-		t.Errorf("robots.txt = %q", rec.Body.String())
+	if rec.Body != "User-agent: *\nDisallow: /aAllow: /secret\n" {
+		t.Errorf("robots.txt = %q", rec.Body)
+	}
+}
+
+// A sitemap given as a path is served absolute, against Config.BaseURL: a
+// relative Sitemap line is invalid by the protocol. (Before v0.3.0, the exported
+// Render wrote it relative.)
+func TestPathSitemapIsAbsolute(t *testing.T) {
+	rec := serve(t, robots.New(robots.Options{Sitemaps: []string{"/sitemap.xml"}}), "/robots.txt",
+		collagetest.WithConfig(func(c *collage.Config) { c.BaseURL = "https://example.com" }))
+	if want := "Sitemap: https://example.com/sitemap.xml\n"; !strings.Contains(rec.Body, want) {
+		t.Errorf("robots.txt = %q, want %q", rec.Body, want)
+	}
+}
+
+// A negative crawl delay stops the application; zero leaves the line out.
+func TestNegativeCrawlDelay(t *testing.T) {
+	_, err := collagetest.TrySite(t, collagetest.WithPlugins(robots.New(robots.Options{})),
+		collagetest.WithPluginConfig(robots.Name, `{"rules": [{"disallow": ["/a"], "crawlDelay": -1}]}`))
+	if err == nil || !strings.Contains(err.Error(), "crawlDelay -1") {
+		t.Errorf("err = %v, want a crawlDelay error", err)
 	}
 }
 

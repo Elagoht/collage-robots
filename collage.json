@@ -25,7 +25,7 @@
             },
             "crawlDelay": {
               "type": "integer",
-              "description": "CrawlDelay asks for this many seconds between requests; zero leaves it out. Not every crawler honours it."
+              "description": "CrawlDelay asks for this many seconds between requests; zero leaves it out, and a negative delay stops the application at start. Not every crawler honours it."
             },
             "disallow": {
               "type": "array",
